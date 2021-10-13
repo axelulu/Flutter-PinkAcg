@@ -1,0 +1,80 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_pink/http/dao/login_dao.dart';
+import 'package:flutter_pink/model/chat_mo.dart';
+import 'package:flutter_pink/util/hi_constants.dart';
+import 'package:web_socket_channel/io.dart';
+
+class WebSocketProvider extends ChangeNotifier implements ISocket {
+  var url = "ws://" + HiConstants.domain + ":8080/api/v1/chat";
+  late IOWebSocketChannel _channel;
+  late ValueChanged<ChatMo> _callBack;
+
+  ///心跳间隔秒数，根据服务器实际timeout进行调整
+  int _intervalSeconds = 50;
+
+  @override
+  void close() {
+    if (_channel != null) {
+      _channel.sink.close();
+    }
+  }
+
+  @override
+  ISocket open() {
+    _channel = IOWebSocketChannel.connect(url,
+        headers: {
+          HiConstants.Authorization: "Bearer " + LoginDao.getBoardingPass()
+        },
+        pingInterval: Duration(seconds: _intervalSeconds));
+    _channel.stream.handleError((error) {
+      print(error);
+    }).listen((event) {
+      _handleMessage(event);
+    });
+    return this;
+  }
+
+  @override
+  ISocket listen(ValueChanged<ChatMo> callBack) {
+    _callBack = callBack;
+    return this;
+  }
+
+  @override
+  ISocket send(String message, int userId, int sendId) {
+    Map msg = {
+      "cmd": 10,
+      "send_id": sendId,
+      "user_id": userId,
+      "content": message,
+      "media": 1,
+    };
+    _channel.sink.add(jsonEncode(msg));
+    return this;
+  }
+
+  ///处理服务端的返回
+  void _handleMessage(event) {
+    event = jsonDecode(event);
+    ChatMo result = ChatMo.fromJson(event);
+    if (result != null && _callBack != null) {
+      _callBack(result);
+    }
+  }
+}
+
+abstract class ISocket {
+  ///和服务器建立连接
+  ISocket open();
+
+  ///发送弹幕
+  ISocket send(String message, int userId, int sendId);
+
+  ///关闭连接
+  void close();
+
+  ///接受弹幕
+  ISocket listen(ValueChanged<ChatMo> callBack);
+}
